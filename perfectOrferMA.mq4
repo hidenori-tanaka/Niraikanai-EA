@@ -21,12 +21,29 @@
 #property indicator_level2  0
 
 // 指標バッファ用の配列の宣言
-double BuffMain[];
-double BuffSub[];
+double buffShort[];
+double buffLong[];
 
 // 外部パラメータ
-extern int mainPeriod = 40;
-extern int subPeriod  = 200;
+extern int periodShort  = 40;
+extern int periodLong   = 200;
+
+extern double lots      = 0.1;
+extern int slippage     = 1;
+extern int slPips       = 2;
+extern int tpPips       = 4;
+extern string COMMENT   = "ENTRY"
+extern int MAGIG        = 100;
+
+extern string indEU1    = "17:30"
+extern string indUS1    = "21:30"
+extern string indUS2    = "23:00"
+
+extern double thSlope   = 2.5;
+
+datetime dtEU1;
+datetime dtUS1;
+datetime dtUS2;
 
 //----------------------------------------------------------------------
 //
@@ -35,19 +52,31 @@ extern int subPeriod  = 200;
 //----------------------------------------------------------------------
 int OnInit()
 {
+    // インジケーター名
+    IndicatorShortName("Perfect Order MA")
+
     // 指標バッファの割り当て
-    SetIndexBuffer(0, BuffMain);
-    SetIndexBuffer(1, BuffSub);
+    SetIndexBuffer(0, buffShort);
+    SetIndexBuffer(1, buffLong);
     
     // 指標ラベルの設定
-    string labelMain = "MA("+mainPeriod+")";
-    string labelSub = "MA("+subPeriod+")";
+    string labelShort = "MA("+periodShort+")";
+    string labelLong = "MA("+periodLong+")";
+
+    SedIndexLable(0, labelShort)
+    SedIndexLable(1, labelLong)
+    
+    // 指標時間設定
+    dtEU1 = StrToTime(indEU1);
+    dtUS1 = StrToTime(indUS1);
+    dtUS2 = StrToTime(indUS2);
+    
     retrun(0);
 }
 
 //----------------------------------------------------------------------
 //
-// 指標計算関数
+// 初期指標計算
 //
 //----------------------------------------------------------------------
 int OnCalculate(const int rates_total,
@@ -61,37 +90,115 @@ int OnCalculate(const int rates_total,
         const long &volume[],
         const int &spread[])
 {
-    int limit = Bars - indicatorCounted();
     int i;
-    for(i= limit-1 ; i>=0 ; i-){
-        BuffMain[i] = iMA(NULL, 0, mainPeriod, 0, MODE_SMA, PRICE_CLISE, i);
-        BuffSub[i] = iMA(NULL, 0, subPeriod, 0, MODE_SMA, PRICE_CLISE, i);
+    color cOrder;
+    
+    //
+    // インジケーター更新
+    //
+    int limit = Bars - indicatorCounted();
+    for(i=limit-1 ; i>=0 ; i--){
+        buffShort[i] = iMA(NULL, 0, periodShort, 0, MODE_SMA, PRICE_CLISE, i);
+        buffLong[i]  = iMA(NULL, 0, periodLong,  0, MODE_SMA, PRICE_CLISE, i);
     }
+
+    //
+    // ポジション保有時
+    //
+    int ticket;
+    for(i=0 ; i<OrderTotal() ; i++){
+        if(isPositionCloseTime()){
+            if(OrderSelect(i, SELECT_BY_POS) == false){
+                break;
+            }
+            if(OrderSymbol() != Symbol() || OrderMagicNumber() != MAGIC){
+                continue;
+            }
+            int type = OrderType();
+            if(type == OP_BUY || type == OP_SELL){
+                if(type == OP_BUY){
+                    cOrder = Blue;
+                }else{
+                    cOrder = Red;
+                }
+                ticket = OrderTicket()
+                OrderClose(ticket, OrderLots(), OrderClosePrice(), slippage, cOrder);        
+            }
+        }
+    }
+    
+    //
+    // エントリー判断
+    //
+    if(isEntryDeniedTime()){
+        return(0)
+    }
+
+    double stopPrice    = 0;
+    double takeProfit   = 0;
     
     // 傾き計算
-    double slopMain, slopeSub;
-    slopeMain = calcSlope(BuffMain, 3);
-    slopeSub  = calcSlope(BuffSub, 3);
+    double slopShort, slopeLong;
+    slopShort = calcSlope(buffShort, 3);
+    slopeLong  = calcSlope(buffLong, 3);
 
-    //
-    // 条件マッチング
-    //
-    bool condLong[3];
-    bool condShort[3];
-    
-    /// MA40がMA200より上にある
-    if(BuffMain[0]>BuffSub[0]){
-        condLong[0] = 1;
+    if(buffShort[0] > buffLong[0]){
+        //
+        // ロング検討
+        //
+        
+        // 傾き
+        if(!((slopShort > thSlope) && (slopeLong > thSlope))){
+            return(0)
+        }
+        
+        // 終値
+        if(!(close[0] > buffShort[0]){
+            return (0)
+        }
+        
+        // 発注
+        if(slPips !=0){
+            stopPrice = Ask - slPips*Point;
+        }
+        if(tpPips !=0){
+            takeProfit = Ask + slPips*Point;
+        }
+        OrderSend(NULL, OP_BUY, lots, Ask, slippage, stopPrice, takeProfit, COMMENT, MAGIC, Blue);
+
+    }elseif(buffShort[0] < buffLong[0]){
+        //
+        // ショート検討
+        //
+        
+        // 傾き
+        if(!(slopShort < -thSlope && slopeLong < -thSlope)){
+            return(0)
+        }
+        
+        // 終値
+        if(!(close[0] < buffShort[0]){
+            return (0)
+        }
+        
+        // 発注
+        // 発注
+        if(slPips !=0){
+            stopPrice = Bid + slPips*Point;
+        }
+        if(tpPips !=0){
+            takeProfit = Bid - slPips*Point;
+        }
+        OrderSend(NULL, OP_SELL, lots, Ask, slippage, stopPrice, takeProfit, COMMENT, MAGIC, Red);
     }
-    
-    int aMain, bMain;
-    
-    slopeMain 
-    
-    
     return(0);
-}    
+}
 
+//----------------------------------------------------------------------
+//
+// 傾き計算
+//
+//----------------------------------------------------------------------
 int calcSlope(double buff[], int n)
 {
     int i;
@@ -115,42 +222,55 @@ int calcSlope(double buff[], int n)
     
     return(a);
 }
+
+//----------------------------------------------------------------------
+//
+// 指標発表5分前
+//
+//----------------------------------------------------------------------
+bool isPositionCloseTime()
+{
+    // 現在時刻取得
+    datetime dtNow = TimeCurrent()
+    datetime dtDiff;
     
-    
-   //変数の宣言
-   int cnt, CurrentPosition;
-   int Ticket;
-   double kakoa,gennzaia;
-   double kakob,gennzaib;
-     
-   // オーダーチェック（ポジションなどのデータ）
-   CurrentPosition=-1;
-   for(cnt=0;cnt<OrdersTotal();cnt++){
-      OrderSelect(cnt,SELECT_BY_POS);
-      if(OrderSymbol() == Symbol()) CurrentPosition=cnt;
-   }
-   
-   //一時間前の２１日線
-   kakoa = iMA(NULL,0,21,0,MODE_SMA,PRICE_CLOSE,1);
-   //一時間前の９０日線
-   kakob = iMA(NULL,0,90,0,MODE_SMA,PRICE_CLOSE,1);
-
-   //現在の２１日線
-   gennzaia = iMA(NULL,0,21,0,MODE_SMA,PRICE_CLOSE,0);
-   //現在の９０日線
-   gennzaib = iMA(NULL,0,90,0,MODE_SMA,PRICE_CLOSE,0);
-
-
-   // ポジションチェック　ポジション無し
-   if(CurrentPosition == -1)
-   {   
-      //もし２１日線が９０日線を下から上にクロスしたら
-      if( kakoa < kakob && gennzaia >= gennzaib)      
-      {
-         //買いポジションを取る  
-         Ticket = OrderSend(Symbol(), OP_BUY, 1, Ask, 3, Ask-(200*Point), Ask+(200*Point), "Buy", 0, 0, Blue);  
-      }  
-   }
-   return(0);
+    dtDiff = dtEU1 - dtNow;
+    if((dtDiff >= 0) and (timeDiff < 300)) {
+        return(true)
+    }
+    dtDiff = dtUS1 - dtNow;
+    if((dtDiff >= 0) and (timeDiff < 300)) {
+        return(true)
+    }
+    dtDiff = dtUS2 - dtNow;
+    if((dtDiff >= 0) and (timeDiff < 300)) {
+        return(true)
+    }
+    return(false)
 }
 
+//----------------------------------------------------------------------
+//
+// 指標発表前後15分
+//
+//----------------------------------------------------------------------
+bool isEntryDeniedTime()
+{
+    // 現在時刻取得
+    datetime dtNow = TimeCurrent()
+    datetime dtDiff;
+    
+    dtDiff = dtEU1 - dtNow;
+    if((dtDiff >= -900) and (timeDiff < 900)) {
+        return(true)
+    }
+    dtDiff = dtUS1 - dtNow;
+    if((dtDiff >= -900) and (timeDiff < 900)) {
+        return(true)
+    }
+    dtDiff = dtUS2 - dtNow;
+    if((dtDiff >= -900) and (timeDiff < 900)) {
+        return(true)
+    }
+    return(false)
+}
